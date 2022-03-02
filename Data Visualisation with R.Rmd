@@ -1,0 +1,372 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+```{r}
+library(lubridate)
+library(tidyverse)
+```
+
+``` {R}
+df_business <- readRDS("C:/Users/lilya/Downloads/R/df_business_vancouver.rds")
+```
+
+**Step 1**
+
+Information on open hours of businesses on different days of the week are in the columns starting with hours_. For example, hours_Monday contains the open hours on Monday. These columns are of type character (i.e., strings).
+In the code below, I have extracted the first 10 non-missing values of hours_Monday as the vector x. The time window that restaurants are open is specified with a particular format: h1:m1-h2:m2, with h1 and m1 denoting the hour and minute for which the restaurant opens, respectively, and h2 and m2 denoting the hour and minute for which they close, respectively.
+
+```{r}
+x <- df_business$hours_Monday
+x <- x[!is.na(x)]
+x <- x[1:10]
+x
+```
+
+Using the vector x I retrieved the four time components (h1, m1, h2, m2) and then calculated the duration (of open time) in minutes:
+
+```{r}
+h1 <- strsplit(x, "-") %>% sapply("[", 1)
+h1 <- strsplit(h1, ":") %>% sapply("[",1) %>% as.numeric()
+m1 <- strsplit(x, "-") %>% sapply("[", 1)
+m1 <- strsplit(m1, ":") %>% sapply("[",2) %>% as.numeric()
+h2 <- strsplit(x, "-") %>% sapply("[",2)
+h2 <- strsplit(h2, ":") %>% sapply("[",1) %>% as.numeric()
+m2 <- strsplit(x, "-") %>% sapply("[", 2)
+m2 <- strsplit(m2, ":") %>% sapply("[",2) %>% as.numeric()
+duration <- (h2 * 60 + m2) - (h1 * 60 + m1) 
+duration
+
+```
+**Step 2**
+I made a function that takes a vector x as input—containing open hours, formatted as the hours_Monday column—and returns the duration of open time in minutes:
+
+```{r}
+get_duration <- function(x) {
+  h1 <- strsplit(x, "-") %>% sapply("[", 1)
+  h1 <- strsplit(h1, ":") %>% sapply("[",1) %>% as.numeric()
+  m1 <- strsplit(x, "-") %>% sapply("[", 1)
+  m1 <- strsplit(m1, ":") %>% sapply("[",2) %>% as.numeric()
+  h2 <- strsplit(x, "-") %>% sapply("[",2)
+  h2 <- strsplit(h2, ":") %>% sapply("[",1) %>% as.numeric()
+  m2 <- strsplit(x, "-") %>% sapply("[", 2)
+  m2 <- strsplit(m2, ":") %>% sapply("[",2) %>% as.numeric()
+  out <- (h2 * 60 + m2) - (h1 * 60 + m1) 
+  return(out)
+}
+```
+
+**Step 3**
+I used the get_duration function to calculate seven new columns for df_business, containing the duration of open time for different days of the week:
+
+```{r}
+df_duration <- df_business %>%
+  mutate(
+    duration_mon = get_duration(hours_Monday),
+    duration_tue = get_duration(hours_Tuesday),
+    duration_wed = get_duration(hours_Wednesday),
+    duration_thu = get_duration(hours_Thursday),
+    duration_fri = get_duration(hours_Friday),
+    duration_sat = get_duration(hours_Saturday),
+    duration_sun = get_duration(hours_Sunday)
+    )
+```
+
+**Step 4**
+
+First, I selected the business_id and the seven columns that contain the duration information. Then, transformed it from a wide data frame (with 8 columns) to a long data frame (with 3 columns). The 3 columns are (1) business_id, (2) wday, specifying the day of the week, and (3) duration, specifying the duration of open time for a business on a specific weekday.
+
+```{r}
+df_duration <- df_duration %>%
+  select(business_id, duration_mon, duration_tue, duration_wed, duration_thu, 
+         duration_fri, duration_sat, duration_sun) %>%
+  pivot_longer(
+    cols = -business_id,
+    names_to = 'wday',
+    values_to = 'duration'
+    )
+
+```
+
+**Step 5**
+Checking to see if there are any negative values in the duration column of df_duration.
+
+```{r}
+df_duration %>%
+  filter(duration < 0)
+```
+
+**Step 6**
+To see why we have negative duration, I take the following steps:
+1. Use df_duration to select the ID of businesses with negative duration, and save the data frame as df1.
+2. Use df1 to select the columns starting with hours_ of df_business.
+Then, I will examine the hours_ columns of the businesses that I calculated a negative duration time for and find out the problem.
+
+```{r}
+df1 <- df_duration %>%
+  filter(duration < 0) %>%
+  select(business_id)
+```
+
+```{r}
+df_business %>%
+  inner_join(df1, by = "business_id") %>%
+  select(hours_Monday, hours_Tuesday, hours_Wednesday, hours_Thursday, 
+         hours_Friday, hours_Saturday, hours_Sunday)
+```
+**Step 7**
+
+I wrote a new function, get_duration_2, that is similar to get_duration but also includes an if_else statement that corrects for the issue that caused negative duration. The if_else statement will change the value of h2 for the cases that we previously calculated a negative duration for.
+
+```{R}
+get_duration_2 <- function(x) {
+  h1 <- strsplit(x, "-") %>% sapply("[", 1)
+  h1 <- strsplit(h1, ":") %>% sapply("[",1) %>% as.numeric()
+  m1 <- strsplit(x, "-") %>% sapply("[", 1)
+  m1 <- strsplit(m1, ":") %>% sapply("[",2) %>% as.numeric()
+  h2 <- strsplit(x, "-") %>% sapply("[",2)
+  h2 <- strsplit(h2, ":") %>% sapply("[",1) %>% as.numeric()
+  m2 <- strsplit(x, "-") %>% sapply("[", 2)
+  m2 <- strsplit(m2, ":") %>% sapply("[",2) %>% as.numeric()
+  h2 <- if_else(h2*60+m2 < h1*60+m1, h2 + 24, h2)
+  out <- (h2 * 60 + m2) - (h1 * 60 + m1)
+  return(out)
+}
+```
+
+**Checking to see if there are negative values or not**
+
+
+```{r}
+df_duration2 <- df_business %>%
+  mutate(
+    duration_mon = get_duration_2(hours_Monday),
+    duration_tue = get_duration_2(hours_Tuesday),
+    duration_wed = get_duration_2(hours_Wednesday),
+    duration_thu = get_duration_2(hours_Thursday),
+    duration_fri = get_duration_2(hours_Friday),
+    duration_sat = get_duration_2(hours_Saturday),
+    duration_sun = get_duration_2(hours_Sunday)
+    )
+```
+
+
+```{r}
+df_duration2 <- df_duration2 %>%
+  select(business_id, duration_mon, duration_tue, duration_wed, duration_thu, 
+         duration_fri, duration_sat, duration_sun) %>%
+  pivot_longer(
+    cols = -business_id,
+    names_to = 'wday',
+    values_to = 'duration'
+    )
+
+```
+
+
+```{r}
+df_duration2 %>%
+  filter(duration < 0)
+```
+
+
+**Step 8**
+
+I calculated a data frame containing duration times called df_duration_2 similar to before, but using get_duration_2 for calculating the duration.
+
+
+```{r}
+df_duration_2 <- df_business %>%
+  mutate(
+    duration_mon = get_duration_2(hours_Monday),
+    duration_tue = get_duration_2(hours_Tuesday),
+    duration_wed = get_duration_2(hours_Wednesday),
+    duration_thu = get_duration_2(hours_Thursday),
+    duration_fri = get_duration_2(hours_Friday),
+    duration_sat = get_duration_2(hours_Saturday),
+    duration_sun = get_duration_2(hours_Sunday)
+    )
+```
+
+```{r}
+df_duration_2 <- df_duration_2 %>%
+  select(business_id, duration_mon, duration_tue, duration_wed, duration_thu, 
+       duration_fri, duration_sat, duration_sun) %>%
+  pivot_longer(
+    cols = -business_id,
+    names_to = 'wday',
+    values_to = 'duration'
+    )
+```
+
+**Step 9** 
+I change the wday column such that prefix duration_ is removed. Then, I changed the wday column into an ordinal column (type factor), with levels ordered from “mon” to “sun”. Finally, I changed duration so that it is in units of hours.
+
+```{r}
+df_duration_2 <- df_duration_2 %>%
+mutate(
+wday = str_replace(wday, "duration_", ""),
+wday = factor(wday, order = TRUE,
+              levels = c("mon", "tue", "wed", "thu", "fri", "sat", "sun")),
+duration = duration %/% 60
+)
+
+```
+
+**Step 10**
+Creating the figure
+
+```{r}
+df_duration_2 %>%
+  ggplot() +
+  geom_hline(yintercept = 0.10) +
+  geom_density(
+    aes(x = duration),
+    fill = "darkgoldenrod"
+  ) +
+  facet_wrap(~wday, ncol = 2) +
+  theme_bw() +
+  scale_x_continuous(breaks = seq(0, 24, by = 2)) +
+  labs(
+  title = "Duration of time that restaurants are open",
+  subtitle = "A horizontal line at y=0.10 has been added to facilitate 
+  comparison",
+  x = "Duration (hr)",
+  y = "Density",
+  caption = str_c(
+    "More proportion of restaurants are closed on Mon than other days of the week",
+    "\n",
+    "Similar pattern on Tue, Wed, Thu, and Fri, with majority open for 8-10 hr",
+    "\n",
+    "Sat is similar to Mon but with less restaurants closed and more restaurants opened for < 8 hr",
+    "\n",
+    "A wide plateau on Sun, from 5 hr to 12 hr",
+    sep = ""
+    )
+  ) + 
+  theme(plot.caption = element_text(hjust = 0))
+
+```
+
+***Figure 2***
+
+**Step 1**
+I wrote a function that takes a character vector of open hours as its input and outputs closing hours as a vector. If closing hour is 2 am next day, for example, then the output should be 26.
+
+```{r}
+get_h <- function(x) {
+  h1 <- strsplit(x, "-") %>% sapply("[", 1)
+  h1 <- strsplit(h1, ":") %>% sapply("[",1) %>% as.numeric()
+  h2 <- strsplit(x, "-") %>% sapply("[",2)
+  h2 <- strsplit(h2, ":") %>% sapply("[",1) %>% as.numeric()
+  h2 <- if_else(
+    h2 < h1, 
+    h2 + 24, 
+    h2
+    )
+  return(h2)
+}
+```
+
+**Step 2**
+I made a data frame, named df_closing, that contains three columns: (1) business_id, (2) wday, and (3) closing, which specifies the closing hour. I made the column wday of type ordinal (i.e., factor) with levels from “mon” to “sun”.
+
+
+```{r}
+df_closing <- df_business %>%
+  mutate(
+    closing_mon = get_h(hours_Monday),
+    closing_tue = get_h(hours_Tuesday),
+    closing_wed = get_h(hours_Wednesday),
+    closing_thu = get_h(hours_Thursday),
+    closing_fri = get_h(hours_Friday),
+    closing_sat = get_h(hours_Saturday),
+    closing_sun = get_h(hours_Sunday)
+    )
+```
+
+```{r}
+df_closing <- df_closing %>%
+  select(business_id, closing_mon, closing_tue, closing_wed, closing_thu, 
+       closing_fri, closing_sat, closing_sun) %>%
+  pivot_longer(
+    cols = -business_id,
+    names_to = 'wday',
+    values_to = 'closing')
+```
+
+
+```{r}
+df_closing <- df_closing %>%
+  mutate(
+  wday = str_replace(wday, "closing_", ""),
+  wday = factor(wday, order = TRUE,
+                levels = c("mon", "tue", "wed",
+                           "thu", "fri", "sat",
+                           "sun")))
+```
+
+**Step 3**
+The attributes_Alcohol column of df_business has 7 unique values, but some are duplicates. For example, the values "u'none", "'none'", and "None" all specify businesses that do not serve alcohol.
+
+```{r}
+df_business$attributes_Alcohol %>% unique()
+```
+
+First, I selected the business_id and attributes_Alcohol column of df_business. Then, changed the attributes_Alcohol so that it has only three values: (1) "none", (2) "full_bar", and (3) "beer_and_wine". I saved the data frame as df_alco.
+
+```{r}
+df_alco <- df_business %>% 
+  select(business_id, attributes_Alcohol) %>% 
+  mutate(
+    attributes_Alcohol = attributes_Alcohol %>% 
+                          str_replace("u'", "'") %>%
+                          str_replace_all("'","") %>%
+                          tolower()
+    )
+```
+
+```{r}
+df_alco$attributes_Alcohol %>% unique()
+```
+
+**Step 4**
+For each business in df_closing I included the information on whether it has a full bar, serves beer and wine, or does not serve any alcohol as a new column.
+
+```{r}
+df_closing <- df_closing %>%
+              inner_join(df_alco, by = "business_id")
+```
+
+**Step 5**
+Creating the figure
+
+```{r}
+df_closing %>%
+  filter(attributes_Alcohol == "full_bar" | attributes_Alcohol == "none") %>%
+  filter(closing != 0) %>%
+  ggplot() +
+  geom_density(
+    aes(x = closing),
+    fill = "darkgoldenrod"
+  ) +
+  facet_grid(
+    wday ~ attributes_Alcohol
+    ) +
+  theme_bw() +
+  scale_x_continuous(
+    breaks = seq(0, 48, by = 2),
+    labels = c(
+      seq(0, 24, by = 2),
+      str_c(seq(2, 24, by = 2), "\n(+1)")
+      )
+  ) +
+  coord_cartesian(xlim = c(12, 24 + 6)) +
+  labs(
+    title = "Closing hours of restaurants",
+    subtitle = "Restaurants with a full bar vs. those that don't serve alcohol",
+    x = "Closing hour (+1 indicates next day)",
+    y = "Density"
+  )
+```
+
